@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Document Summarizer with Q&A</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f4f7f8;
+      color: #333;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 800px;
+      margin: 50px auto;
+      background: #fff;
+      border-radius: 8px;
+      padding: 30px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1, h2, h3 {
+      color: #0056b3;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    input[type="text"], select, textarea, input[type="file"] {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ccd0d5;
+      border-radius: 4px;
+      margin-bottom: 15px;
+      font-size: 1rem;
+    }
+    textarea {
+      resize: vertical;
+    }
+    button {
+      background-color: #0056b3;
+      border: none;
+      color: #fff;
+      padding: 12px 20px;
+      font-size: 1rem;
+      border-radius: 4px;
+      cursor: pointer;
+      width: 100%;
+    }
+    button:hover {
+      background-color: #004494;
+    }
+    .result-box {
+      margin-top: 25px;
+      padding: 20px;
+      border: 1px solid #ccd0d5;
+      background-color: #e9f2f9;
+      border-radius: 4px;
+      white-space: pre-wrap;
+    }
+    .metadata {
+      margin-top: 15px;
+      font-size: 0.9rem;
+      color: #555;
+    }
+    /* Styling for the model search section */
+    .search-container {
+      margin-bottom: 15px;
+    }
+    .search-container input[type="text"] {
+      width: calc(100% - 110px);
+      display: inline-block;
+    }
+    .search-container button {
+      width: 100px;
+      display: inline-block;
+      margin-left: 5px;
+    }
+    .loading {
+      text-align: center;
+      margin: 20px 0;
+      font-style: italic;
+      color: #666;
+    }
+    #error-message {
+      color: #d9534f;
+      margin-bottom: 15px;
+      font-weight: bold;
+      display: none;
+    }
+    /* Checkbox styling */
+    .checkbox-group {
+      margin-bottom: 15px;
+    }
+    .checkbox-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 5px;
+    }
+    .checkbox-option {
+      display: flex;
+      align-items: center;
+      background-color: #f0f5fa;
+      padding: 8px 12px;
+      border-radius: 4px;
+      border: 1px solid #ccd0d5;
+    }
+    .checkbox-option input[type="checkbox"] {
+      margin-right: 6px;
+    }
+    .model-info {
+      font-size: 0.85em;
+      color: #555;
+      margin-top: 3px;
+    }
+    .selected-model {
+      padding: 8px 12px;
+      background-color: #e0f0ff;
+      border-radius: 4px;
+      margin-top: 5px;
+      font-weight: bold;
+      display: none;
+    }
+    
+    /* QA Styling */
+    #qa-section {
+      margin-top: 30px;
+      padding: 20px;
+      border: 1px solid #ccd0d5;
+      border-radius: 8px;
+      background-color: #f8f9fa;
+    }
+    .qa-input-container {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .qa-input {
+      flex-grow: 1;
+      padding: 12px;
+      border: 1px solid #ccd0d5;
+      border-radius: 4px;
+      font-size: 1rem;
+    }
+    .qa-button {
+      background-color: #28a745;
+      color: white;
+      border: none;
+      padding: 0 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      width: auto;
+    }
+    .qa-button:hover {
+      background-color: #218838;
+    }
+    .qa-history {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      max-height: 500px;
+      overflow-y: auto;
+    }
+    .qa-item {
+      margin-bottom: 15px;
+    }
+    .qa-question {
+      background-color: #e9f2f9;
+      padding: 12px 15px;
+      border-radius: 8px 8px 0 8px;
+      border-left: 3px solid #0056b3;
+      max-width: 80%;
+      align-self: flex-start;
+    }
+    .qa-answer {
+      background-color: #f1f9f1;
+      padding: 12px 15px;
+      border-radius: 8px 8px 8px 0;
+      border-left: 3px solid #28a745;
+      margin-top: 8px;
+      max-width: 80%;
+      margin-left: 20px;
+    }
+    .qa-loading {
+      color: #6c757d;
+      font-style: italic;
+    }
+    .qa-error {
+      color: #dc3545;
+      border-left-color: #dc3545;
+    }
+    
+    /* Additional styles for enhanced QA section */
+    .wide-select {
+      width: 100%;
+    }
+    
+    .qa-model-selector {
+      margin-bottom: 20px;
+      padding: 15px;
+      background-color: #f8f9fa;
+      border-radius: 8px;
+      border: 1px solid #e9ecef;
+    }
+    
+    #qa-model-info {
+      margin-top: 8px;
+      font-size: 0.9em;
+      color: #495057;
+      font-style: italic;
+    }
+    
+    optgroup {
+      font-weight: bold;
+      color: #495057;
+    }
+
+    /* Suggested Questions Styling */
+    .suggested-questions {
+      margin-top: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .suggested-question {
+      background-color: #e8f4fc;
+      border: 1px solid #b8daff;
+      padding: 8px 12px;
+      border-radius: 20px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-block;
+      margin-bottom: 8px;
+    }
+
+    .suggested-question:hover {
+      background-color: #cce5ff;
+      border-color: #99caff;
+      transform: translateY(-2px);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+
+    .suggested-question-header {
+      font-size: 0.95rem;
+      font-weight: 500;
+      color: #0056b3;
+      margin-bottom: 10px;
+    }
+
+    .qa-history {
+      margin-bottom: 25px;
+    }
+
+    .initial-questions {
+      margin-top: 10px;
+      margin-bottom: 25px;
+      padding: 15px;
+      background-color: #f8f9fa;
+      border-radius: 8px;
+      border: 1px dashed #ccd0d5;
+    }
+
+    .follow-up-questions {
+      margin-top: 15px;
+      padding-top: 15px;
+      border-top: 1px dashed #e9ecef;
+    }
+
+    /* Loading indicator for suggested questions */
+    .questions-loading {
+      color: #6c757d;
+      font-style: italic;
+      margin: 10px 0;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Document Summarizer with Q&A</h1>
+    <div id="error-message"></div>
+    <form id="summarizeForm">
+      <!-- Model Search Section -->
+      <label for="modelSearch">Search OpenRouter Models:</label>
+      <div class="search-container">
+        <input type="text" id="modelSearch" placeholder="Type model name or description">
+        <button type="button" id="searchBtn">Search</button>
+      </div>
+      <label for="modelSelect">Select Model:</label>
+      <select id="modelSelect" name="model" required>
+        <option value="">Loading models...</option>
+      </select>
+      <div id="selectedModel" class="selected-model"></div>
+      
+      <!-- File Upload -->
+      <label for="file">Upload Document:</label>
+      <input type="file" id="file" name="file" accept=".pdf,.docx,.txt,.md,.html" required>
+      
+      <!-- Summary Length -->
+      <label for="summary_length">Summary Length:</label>
+      <select id="summary_length" name="summary_length" required>
+        <option value="Very Brief">Very Brief</option>
+        <option value="Brief">Brief</option>
+        <option value="Moderate" selected>Moderate</option>
+        <option value="Detailed">Detailed</option>
+        <option value="Comprehensive">Comprehensive</option>
+      </select>
+      
+      <!-- Focus Areas (as checkboxes) -->
+      <div class="checkbox-group">
+        <label>Focus Areas:</label>
+        <div class="checkbox-container">
+          <label class="checkbox-option">
+            <input type="checkbox" name="focus_area" value="key_points" checked> Key Points
+          </label>
+          <label class="checkbox-option">
+            <input type="checkbox" name="focus_area" value="methodology"> Methodology
+          </label>
+          <label class="checkbox-option">
+            <input type="checkbox" name="focus_area" value="examples"> Examples
+          </label>
+          <label class="checkbox-option">
+            <input type="checkbox" name="focus_area" value="conclusions" checked> Conclusions
+          </label>
+          <label class="checkbox-option">
+            <input type="checkbox" name="focus_area" value="implications"> Implications
+          </label>
+          <label class="checkbox-option">
+            <input type="checkbox" name="focus_area" value="technical"> Technical Details
+          </label>
+        </div>
+      </div>
+      
+      <!-- Advanced Settings (Optional) -->
+      <details>
+        <summary>Advanced Settings</summary>
+        <label for="temperature">Temperature (0.0-1.0):</label>
+        <input type="number" id="temperature" name="temperature" min="0" max="1" step="0.1" value="0.3">
+        
+        <label for="max_tokens">Max Tokens:</label>
+        <input type="number" id="max_tokens" name="max_tokens" min="100" max="4000" value="1000">
+        
+        <label for="chunk_size">Chunk Size:</label>
+        <input type="number" id="chunk_size" name="chunk_size" min="1000" max="8000" value="4000">
+        
+        <label for="chunk_overlap">Chunk Overlap:</label>
+        <input type="number" id="chunk_overlap" name="chunk_overlap" min="0" max="1000" value="200">
+        
+        <label for="chain_type">Chain Type:</label>
+        <select id="chain_type" name="chain_type">
+          <option value="refine" selected>Refine</option>
+          <option value="map_reduce">Map Reduce</option>
+        </select>
+      </details>
+      
+      <button type="submit">Generate Summary</button>
+    </form>
+    
+    <div id="loading" class="loading" style="display:none;">
+      Processing your document... This may take a minute or two depending on document size.
+    </div>
+    
+    <div id="output" class="result-box" style="display:none;"></div>
+    <div id="metadata" class="metadata" style="display:none;"></div>
+    
+    <!-- QA Section (hidden initially) -->
+    <div id="qa-section" style="display:none;">
+      <h2>Ask Questions About This Document</h2>
+      
+      <div class="qa-model-selector">
+        <label for="qa-model-select">Model for Q&A:</label>
+        <select id="qa-model-select" class="wide-select">
+          <option value="">Auto-select based on document size</option>
+          <!-- Options will be populated from all OpenRouter models -->
+        </select>
+        <p id="qa-model-info" class="model-info">
+          The system will automatically select an appropriate model based on document size.
+        </p>
+      </div>
+      
+      <div class="qa-input-container">
+        <input type="text" id="qa-input" class="qa-input" placeholder="Ask a question about the document...">
+        <button id="qa-button" class="qa-button">Ask</button>
+      </div>
+      
+      <!-- Suggested Questions Section -->
+      <div id="initial-questions" class="initial-questions" style="display:none;">
+        <div class="suggested-question-header">Suggested questions based on the document:</div>
+        <div id="suggested-questions" class="suggested-questions"></div>
+        <div id="questions-loading" class="questions-loading" style="display:none;">
+          Generating suggested questions...
+        </div>
+      </div>
+      
+      <div id="qa-history" class="qa-history"></div>
+    </div>
+  </div>
+  
+  <script>
+    // API Configuration - Use full URL with the correct port
+    const API_BASE_URL = 'http://localhost:8000'; // Make sure this matches the server port
+    const MODELS_ENDPOINT = '/models';
+    const SUMMARIZE_ENDPOINT = '/summarize';
+    const TASKS_ENDPOINT = '/tasks';
+    const QA_ENDPOINT = '/qa';
+    
+    let allModels = []; // To store all fetched OpenRouter models
+    let currentModelSelection = ""; // Track the currently selected model
+    let currentDocumentTaskId = null; // Store the current document task ID for Q&A
+
+    // Show error message
+    function showError(message) {
+      const errorDiv = document.getElementById("error-message");
+      errorDiv.textContent = message;
+      errorDiv.style.display = "block";
+      setTimeout(() => {
+        errorDiv.style.display = "none";
+      }, 5000);
+    }
+
+    // Function to fetch all models from the backend
+    function fetchAllModels() {
+      const modelSelect = document.getElementById("modelSelect");
+      modelSelect.innerHTML = "<option value=''>Loading models...</option>";
+      
+      fetch(`${API_BASE_URL}${MODELS_ENDPOINT}`)
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(`Error fetching models: ${response.status} ${response.statusText}`);
+          }
+          return response.json();
+        })
+        .then(data => {
+          // data should have a "models" property which is an array
+          allModels = data.models || [];
+          populateModelSelect(allModels);
+          populateQAModelSelect(allModels);
+        })
+        .catch(error => {
+          console.error("Error:", error);
+          showError(`Error loading models: ${error.message}`);
+          modelSelect.innerHTML = "<option value=''>Failed to load models</option>";
+        });
+    }
+
+    // Function to populate the model select element with given models array
+    function populateModelSelect(modelsArray) {
+      const modelSelect = document.getElementById("modelSelect");
+      modelSelect.innerHTML = "";
+      if (modelsArray.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.text = "No models found";
+        modelSelect.appendChild(opt);
+      } else {
+        // Add default option
+        const defaultOpt = document.createElement("option");
+        defaultOpt.value = "";
+        defaultOpt.text = "Select a model";
+        modelSelect.appendChild(defaultOpt);
+        
+        // Add all models
+        modelsArray.forEach(model => {
+          const opt = document.createElement("option");
+          opt.value = model.name;
+          // Display as "model id (description)" if available
+          opt.text = model.description 
+            ? `${model.name} (${model.description})`
+            : model.name;
+          // Add data attributes for context window and cost if available
+          if (model.context_length) {
+            opt.dataset.contextLength = model.context_length;
+          }
+          if (model.cost) {
+            opt.dataset.cost = model.cost;
+          }
+          modelSelect.appendChild(opt);
+        });
+      }
+    }
+    
+    // Function to populate the Q&A model select element
+    function populateQAModelSelect(modelsArray) {
+      const qaModelSelect = document.getElementById("qa-model-select");
+      
+      // Keep the auto-select option as the first option
+      qaModelSelect.innerHTML = "<option value=''>Auto-select based on document size</option>";
+      
+      if (modelsArray.length > 0) {
+        // Define recommended models for grouping
+        const recommendedModels = [
+          "anthropic/claude-3-opus",
+          "anthropic/claude-3-sonnet",
+          "anthropic/claude-3-haiku",
+          "openai/gpt-4",
+          "openai/gpt-4-turbo",
+          "mistralai/mistral-large",
+          "anthropic/claude-3-haiku",
+          "anthropic/claude-3-sonnet-20240229",
+          "anthropic/claude-3-opus-20240229",
+          "anthropic/claude-3-haiku-20240307",
+          "openai/gpt-4-turbo-2024-04-09",
+          "mistral/mistral-large-latest"
+        ];
+        
+        // Create option groups
+        const recommendedGroup = document.createElement("optgroup");
+        recommendedGroup.label = "Recommended for Q&A";
+        
+        const otherGroup = document.createElement("optgroup");
+        otherGroup.label = "Other Available Models";
+        
+        // Sort models alphabetically for easier navigation
+        modelsArray.sort((a, b) => {
+          // Sort by provider first
+          const providerA = a.name.split('/')[0];
+          const providerB = b.name.split('/')[0];
+          
+          if (providerA !== providerB) {
+            return providerA.localeCompare(providerB);
+          }
+          
+          // Then by model name
+          return a.name.localeCompare(b.name);
+        });
+        
+        // Add all models to the select element, grouping recommended ones
+        modelsArray.forEach(model => {
+          const opt = document.createElement("option");
+          opt.value = model.name;
+          
+          // Include context length and cost info if available
+          let displayText = model.name;
+          if (model.context_length || model.cost) {
+            displayText += " (";
+            if (model.context_length) {
+              displayText += `${model.context_length} ctx`;
+            }
+            if (model.context_length && model.cost) {
+              displayText += ", ";
+            }
+            if (model.cost) {
+              displayText += `$${model.cost}`;
+            }
+            displayText += ")";
+          }
+          
+          opt.text = displayText;
+          
+          // Check if this is a recommended model
+          const isRecommended = recommendedModels.some(recModel => 
+            model.name.includes(recModel)
+          );
+          
+          if (isRecommended) {
+            // Add a visual indicator for recommended models
+            opt.text = "[RECOMMENDED] " + displayText;
+            recommendedGroup.appendChild(opt);
+          } else {
+            otherGroup.appendChild(opt);
+          }
+        });
+        
+        // Add option groups to select element
+        if (recommendedGroup.children.length > 0) {
+          qaModelSelect.appendChild(recommendedGroup);
+        }
+        
+        if (otherGroup.children.length > 0) {
+          qaModelSelect.appendChild(otherGroup);
+        }
+        
+        // Add event listener to update UI when model is changed
+        qaModelSelect.addEventListener('change', function() {
+          const selectedOption = this.options[this.selectedIndex];
+          const modelInfo = document.getElementById('qa-model-info');
+          if (modelInfo) {
+            if (this.value) {
+              modelInfo.textContent = `Using model: ${selectedOption.text}`;
+              modelInfo.style.display = 'block';
+            } else {
+              modelInfo.textContent = 'Using automatic model selection based on document size';
+              modelInfo.style.display = 'block';
+            }
+          }
+        });
+      }
+    }
+
+    // Filter models based on search term
+    function filterModels(term) {
+      term = term.toLowerCase();
+      return allModels.filter(model => 
+        model.name.toLowerCase().includes(term) ||
+        (model.description && model.description.toLowerCase().includes(term))
+      );
+    }
+
+    // Update the selected model display
+    function updateSelectedModelInfo() {
+      const modelSelect = document.getElementById("modelSelect");
+      const selectedModelDiv = document.getElementById("selectedModel");
+      
+      if (modelSelect.value) {
+        const selectedOption = modelSelect.options[modelSelect.selectedIndex];
+        let infoText = `Using: ${selectedOption.value}`;
+        
+        // Add context length and cost info if available
+        const contextLength = selectedOption.dataset.contextLength;
+        const cost = selectedOption.dataset.cost;
+        
+        if (contextLength || cost) {
+          infoText += " (";
+          if (contextLength) infoText += `Context: ${contextLength}`;
+          if (contextLength && cost) infoText += ", ";
+          if (cost) infoText += `Cost: ${cost}`;
+          infoText += ")";
+        }
+        
+        selectedModelDiv.textContent = infoText;
+        selectedModelDiv.style.display = "block";
+        
+        // Update our tracking variable
+        currentModelSelection = modelSelect.value;
+      } else {
+        selectedModelDiv.style.display = "none";
+        currentModelSelection = "";
+      }
+    }
+
+    // Event listener for model select change
+    document.getElementById("modelSelect").addEventListener("change", updateSelectedModelInfo);
+
+    // Event listener for Search button
+    document.getElementById("searchBtn").addEventListener("click", function() {
+      const term = document.getElementById("modelSearch").value.trim();
+      let filtered = [];
+      if (term === "") {
+        // If empty search, show all models
+        filtered = allModels;
+      } else {
+        filtered = filterModels(term);
+      }
+      populateModelSelect(filtered);
+    });
+    
+    // Function to fetch suggested questions
+    function fetchSuggestedQuestions(taskId, previousQuestion = null, previousAnswer = null) {
+      const suggestedDiv = document.getElementById('suggested-questions');
+      const loadingDiv = document.getElementById('questions-loading');
+      
+      // Show loading indicator
+      loadingDiv.style.display = 'block';
+      
+      // Build URL with optional params
+      let url = `${API_BASE_URL}/suggest-questions/${taskId}?count=5`;
+      if (previousQuestion) {
+        url += `&previous_question=${encodeURIComponent(previousQuestion)}`;
+      }
+      if (previousAnswer) {
+        url += `&previous_answer=${encodeURIComponent(previousAnswer)}`;
+      }
+      
+      fetch(url)
+        .then(response => {
+          if (!response.ok) {
+            return response.json().then(err => {
+              throw new Error(err.detail || `Error ${response.status}`);
+            });
+          }
+          return response.json();
+        })
+        .then(data => {
+          loadingDiv.style.display = 'none';
+          document.getElementById('initial-questions').style.display = 'block';
+          
+          // Clear previous questions
+          suggestedDiv.innerHTML = '';
+          
+          // Add each suggested question
+          data.questions.forEach(question => {
+            const questionEl = document.createElement('div');
+            questionEl.className = 'suggested-question';
+            questionEl.textContent = question;
+            questionEl.addEventListener('click', () => {
+              // Fill the question input and submit it
+              document.getElementById('qa-input').value = question;
+              submitQuestion();
+            });
+            suggestedDiv.appendChild(questionEl);
+          });
+        })
+        .catch(error => {
+          loadingDiv.style.display = 'none';
+          console.error("Error fetching suggested questions:", error);
+          suggestedDiv.innerHTML = `<div class="questions-loading">Error loading suggested questions: ${error.message}</div>`;
+        });
+    }
+
+    // Function to create follow-up question elements
+    function createFollowUpQuestions(questions, answerElement) {
+      if (!questions || questions.length === 0) return;
+      
+      // Create container for follow-up questions
+      const followUpContainer = document.createElement('div');
+      followUpContainer.className = 'follow-up-questions';
+      
+      // Add header
+      const header = document.createElement('div');
+      header.className = 'suggested-question-header';
+      header.textContent = 'Follow-up questions:';
+      followUpContainer.appendChild(header);
+      
+      // Create buttons for each question
+      const questionsContainer = document.createElement('div');
+      questionsContainer.className = 'suggested-questions';
+      
+      questions.forEach(question => {
+        const questionEl = document.createElement('div');
+        questionEl.className = 'suggested-question';
+        questionEl.textContent = question;
+        questionEl.addEventListener('click', () => {
+          // Fill the question input and submit it
+          document.getElementById('qa-input').value = question;
+          submitQuestion();
+        });
+        questionsContainer.appendChild(questionEl);
+      });
+      
+      followUpContainer.appendChild(questionsContainer);
+      answerElement.appendChild(followUpContainer);
+    }
+    
+    // Function to enable QA section once a document is processed
+    function enableQASection(taskId) {
+      currentDocumentTaskId = taskId;
+      document.getElementById('qa-section').style.display = 'block';
+      
+      // Fetch initial suggested questions
+      fetchSuggestedQuestions(taskId);
+      
+      // Scroll to the QA section
+      document.getElementById('qa-section').scrollIntoView({ behavior: 'smooth' });
+    }
+    
+    // Event listeners for QA
+    document.getElementById('qa-button').addEventListener('click', submitQuestion);
+    document.getElementById('qa-input').addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') {
+        submitQuestion();
+      }
+    });
+    
+    // Function to submit a question
+    function submitQuestion() {
+      const questionInput = document.getElementById('qa-input');
+      const question = questionInput.value.trim();
+      
+      if (!question) {
+        showError("Please enter a question");
+        return;
+      }
+      
+      if (!currentDocumentTaskId) {
+        showError("No document has been processed");
+        return;
+      }
+      
+      // Get selected model or use auto-select
+      const qaModelSelect = document.getElementById('qa-model-select');
+      const selectedModel = qaModelSelect.value;
+      
+      // Add question to history
+      const qaHistory = document.getElementById('qa-history');
+      
+      // Create question element
+      const questionElement = document.createElement('div');
+      questionElement.className = 'qa-item';
+      
+      const questionText = document.createElement('div');
+      questionText.className = 'qa-question';
+      questionText.innerHTML = `<strong>Q:</strong> ${question}`;
+      questionElement.appendChild(questionText);
+      
+      // Create loading answer element
+      const answerElement = document.createElement('div');
+      answerElement.className = 'qa-answer qa-loading';
+      answerElement.textContent = 'Thinking...';
+      questionElement.appendChild(answerElement);
+      
+      // Add to history
+      qaHistory.appendChild(questionElement);
+      
+      // Clear input
+      questionInput.value = '';
+      
+      // Scroll to the new question
+      qaHistory.scrollTop = qaHistory.scrollHeight;
+      
+      // Send question to API
+      fetch(`${API_BASE_URL}${QA_ENDPOINT}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          task_id: currentDocumentTaskId,
+          question: question,
+          model: selectedModel
+        })
+      })
+      .then(response => {
+        if (!response.ok) {
+          return response.json().then(err => {
+            throw new Error(err.detail || `Error ${response.status}`);
+          });
+        }
+        return response.json();
+      })
+      .then(data => {
+        // Start polling for the answer
+        pollQAStatus(data.task_id, answerElement);
+      })
+      .catch(error => {
+        answerElement.className = 'qa-answer qa-error';
+        answerElement.innerHTML = `<strong>Error:</strong> ${error.message}`;
+      });
+    }
+    
+    // Function to poll QA status
+    function pollQAStatus(qaTaskId, answerElement) {
+      const interval = setInterval(() => {
+        fetch(`${API_BASE_URL}${QA_ENDPOINT}/${qaTaskId}`)
+          .then(response => {
+            if (!response.ok) {
+              clearInterval(interval);
+              throw new Error(`Error checking QA status: ${response.status}`);
+            }
+            return response.json();
+          })
+          .then(data => {
+            if (data.status === 'completed') {
+              clearInterval(interval);
+              answerElement.className = 'qa-answer';
+              answerElement.innerHTML = `<strong>A:</strong> ${data.answer}`;
+              
+              // Add model info
+              const modelInfo = document.createElement('div');
+              modelInfo.className = 'model-info';
+              modelInfo.textContent = `Model used: ${data.model}`;
+              answerElement.appendChild(modelInfo);
+              
+              // Add follow-up questions if available
+              if (data.suggested_questions && data.suggested_questions.length > 0) {
+                createFollowUpQuestions(data.suggested_questions, answerElement);
+              }
+              
+              // Scroll to view the answer
+              const qaHistory = document.getElementById('qa-history');
+              qaHistory.scrollTop = qaHistory.scrollHeight;
+            } else if (data.status === 'failed') {
+              clearInterval(interval);
+              answerElement.className = 'qa-answer qa-error';
+              answerElement.innerHTML = `<strong>Error:</strong> ${data.error || 'Unknown error'}`;
+            }
+          })
+          .catch(error => {
+            clearInterval(interval);
+            answerElement.className = 'qa-answer qa-error';
+            answerElement.innerHTML = `<strong>Error:</strong> ${error.message}`;
+          });
+      }, 2000); // Check every 2 seconds
+    }
+
+    // Handle form submission
+    document.getElementById("summarizeForm").addEventListener("submit", function(e) {
+      e.preventDefault();
+      
+      const outputDiv = document.getElementById("output");
+      const metadataDiv = document.getElementById("metadata");
+      const loadingDiv = document.getElementById("loading");
+      
+      // Hide QA section while processing new document
+      document.getElementById("qa-section").style.display = "none";
+      
+      // Clear previous results
+      outputDiv.style.display = "none";
+      metadataDiv.style.display = "none";
+      loadingDiv.style.display = "block";
+      
+      // Validate form
+      const modelSelect = document.getElementById("modelSelect");
+      if (modelSelect.value === "") {
+        showError("Please select a model");
+        loadingDiv.style.display = "none";
+        return;
+      }
+      
+      // Ensure the model selection is current
+      if (currentModelSelection !== modelSelect.value) {
+        currentModelSelection = modelSelect.value;
+      }
+      
+      const fileInput = document.getElementById("file");
+      if(fileInput.files.length === 0){
+        showError("Please select a file");
+        loadingDiv.style.display = "none";
+        return;
+      }
+      
+      // Create FormData object
+      const formData = new FormData();
+      formData.append("file", fileInput.files[0]);
+      formData.append("model", currentModelSelection); // Use our tracked model value
+      formData.append("temperature", document.getElementById("temperature").value);
+      formData.append("max_tokens", document.getElementById("max_tokens").value);
+      formData.append("chunk_size", document.getElementById("chunk_size").value);
+      formData.append("chunk_overlap", document.getElementById("chunk_overlap").value);
+      formData.append("chain_type", document.getElementById("chain_type").value);
+      
+      // Convert summary length to string value
+      formData.append("summary_length", document.getElementById("summary_length").value);
+      
+      // Get selected focus areas from checkboxes
+      const focusCheckboxes = document.querySelectorAll('input[name="focus_area"]:checked');
+      const selectedFocusAreas = Array.from(focusCheckboxes).map(checkbox => checkbox.value);
+      
+      // Make sure at least one focus area is selected
+      if (selectedFocusAreas.length === 0) {
+        showError("Please select at least one focus area");
+        loadingDiv.style.display = "none";
+        return;
+      }
+      
+      // Convert focus areas array to JSON string
+      formData.append("focus_areas", JSON.stringify(selectedFocusAreas));
+      
+      // Add URL parameters
+      updateUrlWithParameters();
+      
+      // Clear QA history for the new document
+      document.getElementById("qa-history").innerHTML = "";
+      
+      // Send request to the API
+      fetch(`${API_BASE_URL}${SUMMARIZE_ENDPOINT}`, {
+        method: "POST",
+        body: formData
+      })
+      .then(response => {
+        if(!response.ok){
+          return response.json().then(err => { 
+            throw new Error(err.detail || `Error ${response.status}: ${response.statusText}`);
+          });
+        }
+        return response.json();
+      })
+      .then(data => {
+        // This should be a task response with task_id
+        if (data.task_id) {
+          outputDiv.style.display = "block";
+          outputDiv.innerHTML = `<h2>Processing</h2><p>Your document is being processed. Task ID: ${data.task_id}</p>`;
+          // Start polling for task status
+          pollTaskStatus(data.task_id);
+        } else {
+          loadingDiv.style.display = "none";
+          showError("Unexpected response format from server");
+        }
+      })
+      .catch(error => {
+        loadingDiv.style.display = "none";
+        outputDiv.style.display = "block";
+        outputDiv.innerHTML = `<h2>Error</h2><p>${error.message}</p>`;
+        showError(error.message);
+      });
+    });
+    
+    // Function to update URL with current parameters
+    function updateUrlWithParameters() {
+      // Get current values
+      const model = document.getElementById("modelSelect").value;
+      const length = document.getElementById("summary_length").value;
+      const focusCheckboxes = document.querySelectorAll('input[name="focus_area"]:checked');
+      const focusAreas = Array.from(focusCheckboxes).map(checkbox => checkbox.value);
+      
+      // Create URL with parameters
+      const url = new URL(window.location.href);
+      url.searchParams.set("model", model);
+      url.searchParams.set("length", length);
+      url.searchParams.set("focus", focusAreas.join(','));
+      
+      // Update browser URL without reloading page
+      window.history.pushState({}, '', url);
+    }
+    
+    // Function to load parameters from URL
+    function loadParametersFromUrl() {
+      const url = new URL(window.location.href);
+      
+      // Get parameters
+      const model = url.searchParams.get("model");
+      const length = url.searchParams.get("length");
+      const focus = url.searchParams.get("focus");
+      
+      // Set model if it exists
+      if (model && document.querySelector(`#modelSelect option[value="${model}"]`)) {
+        document.getElementById("modelSelect").value = model;
+        updateSelectedModelInfo();
+      }
+      
+      // Set length if it exists
+      if (length) {
+        const lengthSelect = document.getElementById("summary_length");
+        for (let i = 0; i < lengthSelect.options.length; i++) {
+          if (lengthSelect.options[i].value === length) {
+            lengthSelect.selectedIndex = i;
+            break;
+          }
+        }
+      }
+      // Set focus areas if they exist
+      if (focus) {
+        const focusAreas = focus.split(',');
+        const checkboxes = document.querySelectorAll('input[name="focus_area"]');
+        
+        // Uncheck all first
+        checkboxes.forEach(checkbox => {
+          checkbox.checked = false;
+        });
+        
+        // Check the ones in the URL
+        focusAreas.forEach(area => {
+          const checkbox = document.querySelector(`input[name="focus_area"][value="${area}"]`);
+          if (checkbox) checkbox.checked = true;
+        });
+      }
+    }
+    
+    // Function to poll task status
+    function pollTaskStatus(taskId) {
+      const interval = setInterval(() => {
+        fetch(`${API_BASE_URL}${TASKS_ENDPOINT}/${taskId}`)
+          .then(response => {
+            if (!response.ok) {
+              clearInterval(interval);
+              throw new Error(`Error checking task status: ${response.status}`);
+            }
+            return response.json();
+          })
+          .then(data => {
+            const outputDiv = document.getElementById("output");
+            const metadataDiv = document.getElementById("metadata");
+            const loadingDiv = document.getElementById("loading");
+            
+            if (data.status === "completed") {
+              // Task completed successfully
+              clearInterval(interval);
+              loadingDiv.style.display = "none";
+              outputDiv.style.display = "block";
+              metadataDiv.style.display = "block";
+              
+              if (data.result && data.result.summary) {
+                outputDiv.innerHTML = "<h2>Summary</h2><p>" + data.result.summary + "</p>";
+                metadataDiv.innerHTML = "<h3>Metadata</h3><pre>" + JSON.stringify(data.result.metadata, null, 2) + "</pre>";
+                
+                // Enable QA for this document
+                enableQASection(taskId);
+              } else {
+                outputDiv.innerHTML = "<h2>Error</h2><p>No summary was generated.</p>";
+              }
+            } else if (data.status === "failed") {
+              // Task failed
+              clearInterval(interval);
+              loadingDiv.style.display = "none";
+              outputDiv.style.display = "block";
+              outputDiv.innerHTML = `<h2>Error</h2><p>Task failed: ${data.error || "Unknown error"}</p>`;
+            } else {
+              // Still processing
+              outputDiv.innerHTML = `<h2>Processing</h2><p>Your document is still being processed. Task ID: ${taskId}</p>`;
+            }
+          })
+          .catch(error => {
+            clearInterval(interval);
+            const loadingDiv = document.getElementById("loading");
+            const outputDiv = document.getElementById("output");
+            
+            loadingDiv.style.display = "none";
+            outputDiv.style.display = "block";
+            outputDiv.innerHTML = `<h2>Error</h2><p>${error.message}</p>`;
+          });
+      }, 3000); // Check every 3 seconds
+    }
+
+    // Initialize on page load
+    window.onload = function() {
+      fetchAllModels();
+      loadParametersFromUrl();
+    };
+  </script>
+</body>
+</html>
