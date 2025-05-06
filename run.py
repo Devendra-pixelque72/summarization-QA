@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """
-Document Summarizer with Q&A - Starter Script
---------------------------------------------
-This script sets up and runs the Document Summarizer with Q&A application.
+Document Summarizer with Q&A - Async Starter Script
+--------------------------------------------------
+This script sets up and runs the Document Summarizer with Q&A application with async support.
 """
 import os
 import sys
@@ -39,6 +39,7 @@ def check_required_files():
         "enhanced_summarizer.py",
         "document_processor.py",
         "openrouter_patch.py",
+        "models.py",
         "index.html"
     ]
     
@@ -59,12 +60,13 @@ def check_dependencies():
     try:
         import fastapi
         import uvicorn
-        #import python_multipart  # For file uploads
+        import aiohttp
+        #import aiofiles
         logger.info("✓ Required Python packages found.")
         return True
     except ImportError as e:
         logger.error(f"Missing required Python package: {e.name}")
-        logger.info("Please install required packages: pip install fastapi uvicorn python-multipart")
+        logger.info("Please install required packages: pip install fastapi uvicorn aiohttp aiofiles")
         return False
 
 def create_upload_folder():
@@ -107,7 +109,7 @@ def run_application(host, port, open_browser_flag=True, reload=True):
     
     # Print a nice banner
     logger.info("=" * 70)
-    logger.info("Document Summarizer with Q&A".center(70))
+    logger.info("Document Summarizer with Q&A (Async Version)".center(70))
     logger.info("=" * 70)
     
     # Show access info
@@ -119,7 +121,7 @@ def run_application(host, port, open_browser_flag=True, reload=True):
     if open_browser_flag:
         open_browser(host, port)
     
-    # Start uvicorn
+    # Start uvicorn with the async app
     try:
         uvicorn.run(
             "main:app", 
@@ -136,7 +138,7 @@ def run_application(host, port, open_browser_flag=True, reload=True):
 def main():
     """Main function."""
     # Parse command-line arguments
-    parser = argparse.ArgumentParser(description="Start the Document Summarizer with Q&A application")
+    parser = argparse.ArgumentParser(description="Start the Document Summarizer with Q&A application (Async Version)")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
     parser.add_argument("--port", type=int, default=8000, help="Port to use")
     parser.add_argument("--no-reload", action="store_true", help="Disable auto-reload")
