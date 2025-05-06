@@ -1,11 +1,13 @@
 """
-Enhanced document summarization and QA using OpenRouter API directly.
+Enhanced document summarization and QA using OpenRouter API directly with async support.
 """
 import os
 import time
 import json
+import asyncio
 from typing import Dict, Any, List, Optional, Tuple
 import logging
+import aiohttp
 
 # Import the direct OpenRouter client
 from openrouter_patch import ChatOpenRouter
@@ -18,8 +20,8 @@ logger = logging.getLogger(__name__)
 SMALL_DOC_MODEL = "openai/gpt-3.5-turbo"
 LARGE_DOC_MODEL = "google/gemini-flash-1.5"
 
-class EnhancedSummarizer:
-    """Enhanced document summarization and QA using OpenRouter API directly."""
+class AsyncEnhancedSummarizer:
+    """Enhanced document summarization and QA using OpenRouter API directly with async support."""
     
     # Define the default prompt as a class variable
     DEFAULT_PROMPT = """
@@ -104,15 +106,15 @@ Answer:
         )
     
     @staticmethod
-    def get_openrouter_models() -> List[Dict[str, Any]]:
-        """Fetch available models from OpenRouter API"""
+    async def get_openrouter_models() -> List[Dict[str, Any]]:
+        """Fetch available models from OpenRouter API asynchronously"""
         api_key = os.environ.get("OPENROUTER_API_KEY")
         if not api_key:
             logger.error("OpenRouter API key not found in environment variables")
             return []
             
         try:
-            models = ChatOpenRouter.get_available_models()
+            models = await ChatOpenRouter.get_available_models()
             logger.info(f"Retrieved {len(models)} models from OpenRouter")
             return models
         except Exception as e:
@@ -141,17 +143,32 @@ Answer:
             logger.info(f"Document length {text_length} chars below threshold, using standard model")
             return SMALL_DOC_MODEL
     
-    def read_document(self, file_path: str) -> str:
-        """Read document from file."""
+    async def read_document(self, file_path: str) -> str:
+        """Read document from file asynchronously."""
         try:
-            with open(file_path, 'r', encoding='utf-8') as file:
-                text = file.read()
-            return text
+            # Use aiofiles to read the file asynchronously
+            try:
+                import aiofiles
+                async with aiofiles.open(file_path, 'r', encoding='utf-8') as file:
+                    text = await file.read()
+                return text
+            except ImportError:
+                # Fall back to synchronous read if aiofiles is not available
+                with open(file_path, 'r', encoding='utf-8') as file:
+                    text = file.read()
+                return text
         except UnicodeDecodeError:
             # Try with a different encoding if UTF-8 fails
-            with open(file_path, 'r', encoding='latin-1') as file:
-                text = file.read()
-            return text
+            try:
+                import aiofiles
+                async with aiofiles.open(file_path, 'r', encoding='latin-1') as file:
+                    text = await file.read()
+                return text
+            except ImportError:
+                # Fall back to synchronous read
+                with open(file_path, 'r', encoding='latin-1') as file:
+                    text = file.read()
+                return text
         except Exception as e:
             raise ValueError(f"Error reading file '{file_path}': {e}")
     
@@ -194,25 +211,25 @@ Answer:
             
         return chunks
     
-    def summarize_chunk(self, chunk: str, custom_prompt: Optional[str] = None) -> str:
-        """Summarize a single chunk of text."""
+    async def summarize_chunk(self, chunk: str, custom_prompt: Optional[str] = None) -> str:
+        """Summarize a single chunk of text asynchronously."""
         prompt_template = custom_prompt if custom_prompt else self.DEFAULT_PROMPT
         prompt = prompt_template.replace("{text}", chunk)
         
         # Log which model is being used for this chunk
         logger.info(f"Summarizing chunk with model: {self.model_name}")
         
-        summary, _ = self.client.summarize(chunk, custom_prompt=prompt_template)
+        summary, _ = await self.client.summarize(chunk, custom_prompt=prompt_template)
         return summary
     
-    def answer_question(
+    async def answer_question(
         self,
         document_text: str,
         question: str,
         model_name: Optional[str] = None
     ) -> Tuple[str, Dict[str, Any]]:
         """
-        Answer a question based on the document text.
+        Answer a question based on the document text asynchronously.
         
         Args:
             document_text: The document text to reference
@@ -254,17 +271,29 @@ Answer:
         try:
             if qa_client == self.client:
                 # If using the same client, use its summarize method
-                answer, metadata = qa_client.summarize("", custom_prompt=qa_prompt)
+                answer, metadata = await qa_client.summarize("", custom_prompt=qa_prompt)
             else:
                 # If using a new client, use its answer_question method
-                answer, metadata = qa_client.answer_question(document_text, question)
+                answer, metadata = await qa_client.answer_question(document_text, question)
             
             return answer, metadata
         except Exception as e:
             logger.error(f"Error in QA: {str(e)}")
             return f"Error generating answer: {str(e)}", {"error": str(e)}
     
-    def summarize(
+    async def summarize_chunks_parallel(self, chunks: List[str], custom_prompt: Optional[str] = None) -> List[str]:
+        """Summarize multiple chunks in parallel asynchronously."""
+        if not chunks:
+            return []
+            
+        # Create tasks for all chunks
+        tasks = [self.summarize_chunk(chunk, custom_prompt) for chunk in chunks]
+        
+        # Execute all summarization tasks in parallel
+        chunk_summaries = await asyncio.gather(*tasks)
+        return chunk_summaries
+    
+    async def summarize(
         self, 
         input_source: str, 
         is_file_path: bool = True,
@@ -272,7 +301,7 @@ Answer:
         verbose: bool = False
     ) -> Dict[str, Any]:
         """
-        Summarize a document with detailed metrics.
+        Summarize a document with detailed metrics asynchronously.
         
         Args:
             input_source: Path to document file OR text content
@@ -290,7 +319,7 @@ Answer:
         
         # Get text content
         if is_file_path:
-            text = self.read_document(input_source)
+            text = await self.read_document(input_source)
             doc_path = input_source
         else:
             text = input_source
@@ -319,19 +348,14 @@ Answer:
             # If only one chunk, summarize it directly
             if verbose:
                 logger.info("Single chunk, generating summary directly")
-            summary, metadata = self.client.summarize(chunks[0], custom_prompt=custom_prompt or self.DEFAULT_PROMPT)
+            summary, metadata = await self.client.summarize(chunks[0], custom_prompt=custom_prompt or self.DEFAULT_PROMPT)
         else:
-            # For multiple chunks, summarize each chunk and then combine
+            # For multiple chunks, summarize each chunk in parallel and then combine
             if verbose:
-                logger.info(f"Processing {num_chunks} chunks")
+                logger.info(f"Processing {num_chunks} chunks in parallel")
                 
-            # First pass: summarize each chunk
-            chunk_summaries = []
-            for i, chunk in enumerate(chunks):
-                if verbose:
-                    logger.info(f"Summarizing chunk {i+1} of {num_chunks}")
-                chunk_summary = self.summarize_chunk(chunk, custom_prompt)
-                chunk_summaries.append(chunk_summary)
+            # First pass: summarize each chunk in parallel
+            chunk_summaries = await self.summarize_chunks_parallel(chunks, custom_prompt)
                 
             # Second pass: combine the summaries
             if verbose:
@@ -351,7 +375,7 @@ Please create a cohesive final summary that integrates all the information:
 Provide a well-structured summary with a logical flow. Include an introduction, body, and conclusion.
 """
             
-            summary, metadata = self.client.summarize(combined_text, custom_prompt=final_prompt)
+            summary, metadata = await self.client.summarize(combined_text, custom_prompt=final_prompt)
         
         # Estimate token usage
         # Rough estimate: 1 token ≈ 4 characters

@@ -1,20 +1,21 @@
 """
-Document Summarizer API - Data Models and Utilities
---------------------------------------------------
-This file contains all Pydantic models and utility functions for the API.
+Document Summarizer API - Data Models and Utilities with Async Support
+--------------------------------------------------------------------
+This file contains all Pydantic models and async utility functions for the API.
 """
 import os
 import uuid
 import logging
 import json
 import time
+import asyncio
 from typing import Optional, Dict, Any, List, Tuple
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
-# Import the EnhancedSummarizer class and DocumentProcessor
-from enhanced_summarizer import EnhancedSummarizer, SMALL_DOC_MODEL, LARGE_DOC_MODEL
-from document_processor import DocumentProcessor
+# Import the AsyncEnhancedSummarizer class and AsyncDocumentProcessor
+from enhanced_summarizer import AsyncEnhancedSummarizer, SMALL_DOC_MODEL, LARGE_DOC_MODEL
+from document_processor import AsyncDocumentProcessor
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -43,7 +44,7 @@ class SummaryResponse(BaseModel):
 
 class SummaryTask(BaseModel):
     task_id: str = Field(..., description="Unique task ID")
-    status: str = Field(..., description="Task status (pending, completed, failed)")
+    status: str = Field(..., description="Task status (pending, processing, completed, failed)")
     created_at: float = Field(..., description="Task creation timestamp")
     completed_at: Optional[float] = Field(None, description="Task completion timestamp")
     result: Optional[SummaryResponse] = Field(None, description="Summary result (if completed)")
@@ -59,7 +60,7 @@ class QATask(BaseModel):
     task_id: str = Field(..., description="QA task ID")
     document_task_id: str = Field(..., description="Document task ID")
     question: str = Field(..., description="Question asked")
-    status: str = Field(..., description="Task status (pending, completed, failed)")
+    status: str = Field(..., description="Task status (pending, processing, completed, failed)")
     created_at: float = Field(..., description="Task creation timestamp")
     completed_at: Optional[float] = Field(None, description="Task completion timestamp")
     answer: Optional[str] = Field(None, description="Answer to the question")
@@ -103,13 +104,16 @@ async def process_document_task(
     summary_length: str,
     focus_areas: List[str]
 ):
-    """Background task to process document and generate summary"""
+    """Async background task to process document and generate summary"""
     try:
-        # Initialize document processor
-        doc_processor = DocumentProcessor(verbose=True)
+        # Update task status to processing
+        tasks[task_id].status = "processing"
         
-        # Process document to extract text
-        text, file_metadata = doc_processor.process_document(file_path)
+        # Initialize document processor
+        doc_processor = AsyncDocumentProcessor(verbose=True)
+        
+        # Process document to extract text asynchronously
+        text, file_metadata = await doc_processor.process_document(file_path)
         
         # Store the document text for later QA use
         tasks[task_id].document_text = text
@@ -150,7 +154,7 @@ async def process_document_task(
         """
         
         # Initialize summarizer with the specified model
-        summarizer = EnhancedSummarizer(
+        summarizer = AsyncEnhancedSummarizer(
             model_name=model,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -163,8 +167,8 @@ async def process_document_task(
         # Log the model that was used
         logger.info(f"Task {task_id}: Initialized summarizer with model {model}")
         
-        # Generate summary
-        result = summarizer.summarize(
+        # Generate summary asynchronously
+        result = await summarizer.summarize(
             text,
             is_file_path=False,
             custom_prompt=custom_prompt,
@@ -210,8 +214,11 @@ async def process_qa_task(
     question: str,
     model: Optional[str]
 ):
-    """Process a question-answering task in the background"""
+    """Process a question-answering task in the background asynchronously"""
     try:
+        # Update QA task status to processing
+        qa_tasks[qa_task_id].status = "processing"
+        
         # Get document text from the original document task
         if document_task_id not in tasks:
             raise ValueError(f"Document task {document_task_id} not found")
@@ -226,22 +233,22 @@ async def process_qa_task(
         
         # Auto-select appropriate model if not provided
         if model is None:
-            model = EnhancedSummarizer.get_model_for_document_size(document_length)
+            model = AsyncEnhancedSummarizer.get_model_for_document_size(document_length)
             logger.info(f"Auto-selected model {model} for QA based on document length ({document_length} chars)")
             qa_tasks[qa_task_id].model = model
             
-        # Create an EnhancedSummarizer instance for QA
-        qa_model = EnhancedSummarizer(
+        # Create an AsyncEnhancedSummarizer instance for QA
+        qa_model = AsyncEnhancedSummarizer(
             model_name=model,
             temperature=0.2,  # Lower temperature for factual responses
             max_tokens=1000,  # Appropriate limit for answers
             http_referer="https://document-summarizer-api.example.com/"
         )
         
-        # Get the answer
-        answer, metadata = qa_model.answer_question(document_text, question, model)
+        # Get the answer asynchronously
+        answer, metadata = await qa_model.answer_question(document_text, question, model)
         
-        # Generate suggested follow-up questions
+        # Generate suggested follow-up questions asynchronously
         summary = document_task.result.summary if document_task.result else None
         suggested_questions = await generate_suggested_questions(
             document_text=document_text,
@@ -273,12 +280,12 @@ async def generate_suggested_questions(
     previous_answer: Optional[str] = None,
     count: int = 5
 ) -> List[str]:
-    """Generate suggested questions based on document content and optionally previous Q&A"""
+    """Generate suggested questions based on document content and optionally previous Q&A asynchronously"""
     # Choose an appropriate model - using a smaller model for speed
     model = SMALL_DOC_MODEL
     
-    # Create an EnhancedSummarizer instance for generating questions
-    question_generator = EnhancedSummarizer(
+    # Create an AsyncEnhancedSummarizer instance for generating questions
+    question_generator = AsyncEnhancedSummarizer(
         model_name=model,
         temperature=0.7,  # Higher temperature for creative questions
         max_tokens=500,
@@ -311,9 +318,9 @@ async def generate_suggested_questions(
         Format your response as a numbered list of questions only, without any explanations or other text.
         """
     
-    # Generate questions
+    # Generate questions asynchronously
     logger.info(f"Generating suggested questions based on {'previous Q&A' if previous_question else 'document'}")
-    response, _ = question_generator.answer_question(document_text, prompt)
+    response, _ = await question_generator.answer_question(document_text, prompt)
     
     # Parse the response to extract questions
     questions = []

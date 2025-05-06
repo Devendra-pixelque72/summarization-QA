@@ -1,11 +1,14 @@
 """
-OpenRouter integration with LangChain using the latest API patterns.
+OpenRouter integration with LangChain using the latest API patterns with async support.
 """
 from typing import Any, Dict, List, Optional, Sequence, Union, Mapping, Type, cast, Tuple
 import json
 import logging
 import requests
+import aiohttp
 import os
+import asyncio
+import random
 from urllib.parse import urlparse
 
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun, Callbacks
@@ -25,7 +28,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 class ChatOpenRouter(BaseChatModel):
-    """Chat model that uses OpenRouter API."""
+    """Chat model that uses OpenRouter API with async support."""
     
     openrouter_api_key: str
     model_name: str = "openai/gpt-3.5-turbo"
@@ -43,6 +46,11 @@ class ChatOpenRouter(BaseChatModel):
     
     # Debug options
     debug_mode: bool = True
+    
+    @property
+    def _llm_type(self) -> str:
+        """Return type of llm."""
+        return "openrouter_chat"
     
     @root_validator()
     def validate_environment(cls, values: Dict) -> Dict:
@@ -133,7 +141,18 @@ class ChatOpenRouter(BaseChatModel):
         run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> ChatResult:
-        """Generate chat completion using OpenRouter API."""
+        """Generate chat completion using OpenRouter API - synchronous version."""
+        # For backward compatibility with existing code
+        raise NotImplementedError("Please use async _agenerate method instead")
+    
+    async def _agenerate(
+        self,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        """Generate chat completion using OpenRouter API - async version."""
         # Ensure HTTP-Referer has a valid format
         referer = self.http_referer
         if referer and not (referer.startswith('http://') or referer.startswith('https://')):
@@ -183,71 +202,99 @@ class ChatOpenRouter(BaseChatModel):
             logger.info(f"Using model: {debug_params.get('model')}")
             logger.info(f"Request params: {json.dumps(debug_params, default=str)}")
         
-        try:
-            # Make API call
-            response = requests.post(
-                self.openrouter_url,
-                headers=headers,
-                json=params,
-                timeout=self.timeout
-            )
-            
-            # Log API response for debugging
-            if self.debug_mode:
-                logger.info(f"Response status: {response.status_code}")
-                try:
-                    logger.info(f"Response JSON: {json.dumps(response.json(), indent=2)}")
-                except:
-                    logger.info(f"Response text: {response.text}")
-            
-            # Handle errors
-            if response.status_code != 200:
-                error_message = f"OpenRouter API returned error {response.status_code}: {response.text}"
-                logger.error(error_message)
-                raise ValueError(error_message)
-            
-            # Parse response
+        # Implement retry mechanism with exponential backoff
+        max_retries = 5
+        retry_count = 0
+        base_delay = 1  # Start with 1 second delay
+        
+        while retry_count <= max_retries:
             try:
-                parsed_response = response.json()
-            except json.JSONDecodeError:
-                logger.error(f"Failed to decode JSON response: {response.text}")
-                raise ValueError(f"OpenRouter returned invalid JSON: {response.text}")
-            
-            # Check for expected fields
-            if "choices" not in parsed_response:
-                logger.error(f"Response missing 'choices' field: {parsed_response}")
+                # Make async API call
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        self.openrouter_url,
+                        headers=headers,
+                        json=params,
+                        timeout=self.timeout
+                    ) as response:
+                        # Parse JSON response (even for error responses)
+                        try:
+                            parsed_response = await response.json()
+                        except json.JSONDecodeError:
+                            response_text = await response.text()
+                            logger.error(f"Failed to decode JSON response: {response_text}")
+                            raise ValueError(f"OpenRouter returned invalid JSON: {response_text}")
+                        
+                        # Check for rate limiting error in the parsed response
+                        if "error" in parsed_response and parsed_response.get("error", {}).get("code") == 429:
+                            retry_count += 1
+                            
+                            if retry_count > max_retries:
+                                logger.error(f"Exceeded maximum retries ({max_retries}) for rate limit")
+                                raise ValueError(f"Rate limit exceeded after {max_retries} retries")
+                            
+                            # Calculate delay with exponential backoff and jitter
+                            delay = base_delay * (2 ** (retry_count - 1)) * (0.5 + random.random())
+                            delay = min(delay, 60)  # Cap at 60 seconds
+                            
+                            logger.warning(f"Rate limited by provider (429). Retry {retry_count}/{max_retries} after {delay:.2f}s")
+                            await asyncio.sleep(delay)
+                            continue
+                        
+                        # Check for HTTP errors
+                        if response.status != 200:
+                            response_text = await response.text()
+                            error_message = f"OpenRouter API returned error {response.status}: {response_text}"
+                            logger.error(error_message)
+                            raise ValueError(error_message)
+                        
+                        # Log API response for debugging
+                        if self.debug_mode:
+                            logger.info(f"Response status: {response.status}")
+                            logger.info(f"Response JSON: {json.dumps(parsed_response, indent=2)}")
+                        
+                        # Check for expected fields
+                        if "choices" not in parsed_response:
+                            logger.error(f"Response missing 'choices' field: {parsed_response}")
+                            
+                            if "error" in parsed_response:
+                                error_msg = parsed_response.get("error", {}).get("message", "Unknown error")
+                                raise ValueError(f"OpenRouter response error: {error_msg}")
+                            
+                            # Create a synthetic response
+                            logger.warning("Creating synthetic response due to missing 'choices' field")
+                            synthetic_msg = "I encountered an issue with the API response. Please try again."
+                            
+                            return ChatResult(
+                                generations=[
+                                    ChatGeneration(
+                                        message=AIMessage(content=synthetic_msg),
+                                        generation_info={"synthetic_response": True}
+                                    )
+                                ],
+                                llm_output={"raw_response": parsed_response}
+                            )
+                        
+                        # Successfully got a response with choices, return it
+                        return self._create_chat_result(parsed_response)
                 
-                if "error" in parsed_response:
-                    error_msg = parsed_response.get("error", {}).get("message", "Unknown error")
-                    raise ValueError(f"OpenRouter response error: {error_msg}")
-                
-                # Create a synthetic response
-                logger.warning("Creating synthetic response due to missing 'choices' field")
-                synthetic_msg = "I encountered an issue with the API response. Please try again."
-                
-                return ChatResult(
-                    generations=[
-                        ChatGeneration(
-                            message=AIMessage(content=synthetic_msg),
-                            generation_info={"synthetic_response": True}
-                        )
-                    ],
-                    llm_output={"raw_response": parsed_response}
-                )
-            
-            return self._create_chat_result(parsed_response)
-            
-        except requests.RequestException as e:
-            logger.error(f"Request to OpenRouter failed: {str(e)}")
-            raise ValueError(f"Error communicating with OpenRouter API: {str(e)}")
+            except aiohttp.ClientError as e:
+                logger.error(f"Request to OpenRouter failed: {str(e)}")
+                raise ValueError(f"Error communicating with OpenRouter API: {str(e)}")
+            except asyncio.TimeoutError:
+                logger.error(f"Request to OpenRouter timed out after {self.timeout}s")
+                raise ValueError(f"OpenRouter API request timed out after {self.timeout}s")
+        
+        # Should not reach here unless there's a bug in the retry logic
+        raise ValueError("Exceeded maximum retries with no result")
     
-    def summarize(
+    async def summarize(
         self, 
         text: str,
         custom_prompt: Optional[str] = None
     ) -> Tuple[str, Dict[str, Any]]:
         """
-        Summarize a text using the OpenRouter API.
+        Summarize a text using the OpenRouter API asynchronously.
         
         Args:
             text: Text content to summarize
@@ -278,8 +325,8 @@ class ChatOpenRouter(BaseChatModel):
             HumanMessage(content=prompt)
         ]
         
-        # Generate response
-        result = self._generate(messages=messages)
+        # Generate response asynchronously
+        result = await self._agenerate(messages=messages)
         
         if not result.generations:
             summary = "Unable to generate summary."
@@ -294,13 +341,13 @@ class ChatOpenRouter(BaseChatModel):
         
         return summary, metadata
     
-    def answer_question(
+    async def answer_question(
         self,
         document_text: str,
         question: str
     ) -> Tuple[str, Dict[str, Any]]:
         """
-        Answer a question based on document text.
+        Answer a question based on document text asynchronously.
         
         Args:
             document_text: The document text to reference
@@ -330,8 +377,8 @@ class ChatOpenRouter(BaseChatModel):
             HumanMessage(content=qa_prompt)
         ]
         
-        # Generate response
-        result = self._generate(messages=messages)
+        # Generate response asynchronously
+        result = await self._agenerate(messages=messages)
         
         if not result.generations:
             answer = "Unable to generate an answer."
@@ -346,9 +393,9 @@ class ChatOpenRouter(BaseChatModel):
         
         return answer, metadata
     
-    @classmethod
-    def get_available_models(cls) -> List[Dict[str, Any]]:
-        """Fetch available models from OpenRouter API."""
+    @staticmethod
+    async def get_available_models() -> List[Dict[str, Any]]:
+        """Fetch available models from OpenRouter API asynchronously."""
         url = "https://openrouter.ai/api/v1/models"
         api_key = os.environ.get("OPENROUTER_API_KEY")
         
@@ -363,62 +410,44 @@ class ChatOpenRouter(BaseChatModel):
                 "Content-Type": "application/json"
             }
             
-            logger.info("Fetching models from OpenRouter API")
-            response = requests.get(url, headers=headers)
+            logger.info("Fetching models from OpenRouter API (async)")
             
-            if response.status_code != 200:
-                logger.error(f"Error fetching models: {response.status_code}: {response.text}")
-                return []
-                
-            data = response.json()
-            models = data.get("data", [])
-            
-            logger.info(f"Retrieved {len(models)} models from OpenRouter")
-            
-            # Format model information
-            formatted_models = []
-            for model in models:
-                # Extract key information from the model data
-                model_info = {
-                    "name": model.get("id", "unknown"),
-                    "description": model.get("description", ""),
-                    "context_length": str(model.get("context_length", "")),
-                    "cost": model.get("pricing", {}).get("prompt", "")
-                }
-                
-                # Try to extract additional information for better display
-                if "training_data" in model:
-                    model_info["training_data"] = model.get("training_data")
-                
-                if "pricing" in model:
-                    prompt_price = model.get("pricing", {}).get("prompt", "")
-                    completion_price = model.get("pricing", {}).get("completion", "")
-                    if prompt_price and completion_price and prompt_price != completion_price:
-                        model_info["cost"] = f"{prompt_price}/{completion_price}"
-                
-                formatted_models.append(model_info)
-                
-            return formatted_models
-            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    if response.status != 200:
+                        logger.error(f"Error fetching models: {response.status}: {await response.text()}")
+                        return []
+                        
+                    data = await response.json()
+                    models = data.get("data", [])
+                    
+                    logger.info(f"Retrieved {len(models)} models from OpenRouter (async)")
+                    
+                    # Format model information
+                    formatted_models = []
+                    for model in models:
+                        # Extract key information from the model data
+                        model_info = {
+                            "name": model.get("id", "unknown"),
+                            "description": model.get("description", ""),
+                            "context_length": str(model.get("context_length", "")),
+                            "cost": model.get("pricing", {}).get("prompt", "")
+                        }
+                        
+                        # Try to extract additional information for better display
+                        if "training_data" in model:
+                            model_info["training_data"] = model.get("training_data")
+                        
+                        if "pricing" in model:
+                            prompt_price = model.get("pricing", {}).get("prompt", "")
+                            completion_price = model.get("pricing", {}).get("completion", "")
+                            if prompt_price and completion_price and prompt_price != completion_price:
+                                model_info["cost"] = f"{prompt_price}/{completion_price}"
+                        
+                        formatted_models.append(model_info)
+                        
+                    return formatted_models
+                    
         except Exception as e:
             logger.error(f"Error fetching OpenRouter models: {str(e)}")
             return []
-    
-    @property
-    def _llm_type(self) -> str:
-        """Return type of llm."""
-        return "openrouter"
-    
-    @property
-    def _identifying_params(self) -> Dict[str, Any]:
-        """Get identifying parameters."""
-        return {
-            "model_name": self.model_name,
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
-        }
-
-# For backward compatibility
-class OpenRouterLLM(ChatOpenRouter):
-    """Alias for backward compatibility."""
-    pass

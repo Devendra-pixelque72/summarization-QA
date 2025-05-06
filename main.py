@@ -1,6 +1,6 @@
 """
-Document Summarizer Microservice
---------------------------------
+Document Summarizer Microservice with Async Support
+--------------------------------------------------
 FastAPI microservice for document summarization and QA using OpenRouter LLMs.
 """
 import os
@@ -9,6 +9,7 @@ import json
 import logging
 import uuid
 import time
+import asyncio
 from typing import Optional, Dict, Any, List
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 from dotenv import load_dotenv
 
-# Import models and processing functions
+# Import async models and processing functions
 from models import (
     SummaryTask, QATask, QARequest, QAResponse, SuggestedQuestions,
     tasks, qa_tasks, allowed_file, process_document_task, process_qa_task, 
@@ -25,7 +26,7 @@ from models import (
 )
 
 # Import from enhanced_summarizer for model fetching
-from enhanced_summarizer import EnhancedSummarizer, SMALL_DOC_MODEL, LARGE_DOC_MODEL
+from enhanced_summarizer import AsyncEnhancedSummarizer, SMALL_DOC_MODEL, LARGE_DOC_MODEL
 
 # Load environment variables from .env file
 load_dotenv()
@@ -80,12 +81,12 @@ async def health_check():
 
 @app.get("/models")
 async def get_models():
-    """Retrieve available models from OpenRouter"""
+    """Retrieve available models from OpenRouter asynchronously"""
     try:
         if not OPENROUTER_API_KEY:
             raise HTTPException(status_code=500, detail="OPENROUTER_API_KEY not configured")
             
-        models = EnhancedSummarizer.get_openrouter_models()
+        models = await AsyncEnhancedSummarizer.get_openrouter_models()
         
         # Highlight the recommended models for document summarization and QA
         for model in models:
@@ -101,7 +102,6 @@ async def get_models():
 
 @app.post("/summarize", response_model=SummaryTask)
 async def summarize_document(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     model: str = Form(...),
     temperature: float = Form(0.3),
@@ -188,19 +188,20 @@ async def summarize_document(
     # Log the task creation
     logger.info(f"Created task {task_id} for model {model}")
     
-    # Add task to background tasks
-    background_tasks.add_task(
-        process_document_task,
-        task_id,
-        tmp_file_path,
-        model,
-        temperature,
-        max_tokens,
-        chunk_size,
-        chunk_overlap,
-        chain_type,
-        summary_length,
-        focus_areas_list
+    # Start the async document processing task
+    asyncio.create_task(
+        process_document_task(
+            task_id,
+            tmp_file_path,
+            model,
+            temperature,
+            max_tokens,
+            chunk_size,
+            chunk_overlap,
+            chain_type,
+            summary_length,
+            focus_areas_list
+        )
     )
     
     return tasks[task_id]
@@ -217,7 +218,6 @@ async def get_task_status(task_id: str):
 
 @app.post("/qa", response_model=QATask)
 async def ask_question(
-    background_tasks: BackgroundTasks,
     qa_request: QARequest
 ):
     """
@@ -250,7 +250,7 @@ async def ask_question(
     # Select model if not provided
     model = qa_request.model
     if not model:
-        model = EnhancedSummarizer.get_model_for_document_size(document_length)
+        model = AsyncEnhancedSummarizer.get_model_for_document_size(document_length)
         logger.info(f"Auto-selected model {model} for QA based on document length ({document_length} chars)")
     
     # Create QA task
@@ -266,13 +266,14 @@ async def ask_question(
         model=model
     )
     
-    # Process QA in background
-    background_tasks.add_task(
-        process_qa_task,
-        qa_task_id,
-        qa_request.task_id,
-        qa_request.question,
-        model
+    # Start the async QA processing task
+    asyncio.create_task(
+        process_qa_task(
+            qa_task_id,
+            qa_request.task_id,
+            qa_request.question,
+            model
+        )
     )
     
     return qa_tasks[qa_task_id]
@@ -309,7 +310,7 @@ async def get_suggested_questions(
     previous_answer: Optional[str] = None,
     count: int = 5
 ):
-    """Get suggested questions for a document"""
+    """Get suggested questions for a document asynchronously"""
     if task_id not in tasks:
         raise HTTPException(status_code=404, detail="Document not found")
         
@@ -325,7 +326,7 @@ async def get_suggested_questions(
     document_text = task.document_text
     summary = task.result.summary if task.result else None
     
-    # Generate suggested questions
+    # Generate suggested questions asynchronously
     questions = await generate_suggested_questions(
         document_text=document_text,
         summary=summary,
@@ -337,4 +338,8 @@ async def get_suggested_questions(
     return SuggestedQuestions(questions=questions, source="summary" if summary else "document")
 
 if __name__ == "__main__":
+    # Create the uploads folder if it doesn't exist
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    
+    # Run the FastAPI application with uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
